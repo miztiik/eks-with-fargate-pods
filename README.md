@@ -1,18 +1,22 @@
-# Kubernetes Scheduling: Node Selection, Affinity & AntiAffinity
+# Kubernetes Pods on Fargate
 
 The developer at Mystique Unicorn are interested in building their application using event-driven architectural pattern to process streaming data. For those who are unfamiliar, _An event-driven architecture uses events to trigger and communicate between decoupled services and is common in modern applications built with microservices. An event is a change in state, or an update, like an item being placed in a shopping cart on an e-commerce website._
 
-In this application, Kubernetes has been chosen as the platform to host their application producing and consuming events. The developers do not want to worry about patching, scaling, or securing a cluster of EC2 instances to run Kubernetes applications in the cloud. They are looking for a low-overhead mechnaism to run their pods
+In this application, Kubernetes has been chosen as the platform to host their application producing and consuming events. The developers do not want to worry about patching, scaling, or securing a cluster of EC2 instances to run Kubernetes applications in the cloud. They are looking for a low-overhead mechanism to run their pods.
 
 Can you help them?
 
-![Miztiik Automation: Kubernetes Scheduling: Node Selection, Affinity & AntiAffinity](images/miztiik_automation_eks_scheduling_with_affinity_architecture_000.png)
+![Miztiik Automation: Kubernetes Pods on Fargate](images/miztiik_automation_eks_with_fargate_pods_architecture_000.png)
 
 ## 🎯 Solutions
 
 AWS Fargate<sup>[1]</sup> is a serverless compute engine for containers that works with Amazon Elastic Kubernetes Service (EKS). Fargate reliminates the need for customers to create or manage EC2 instances for their Amazon EKS clusters. Using Fargate, customers define and pay for resources at the pod-level. This makes it easy to right-size resource utilization for each application and allow customers to clearly see the cost of each pod.
 
 Fargate allocates the right amount of compute, eliminating the need to choose instances and scale cluster capacity. You only pay for the resources required to run your containers, so there is no over-provisioning and paying for additional servers. Fargate runs each task or pod in its own kernel providing the tasks and pods their own isolated compute environment. This enables your application to have workload isolation and improved security by design.
+
+We must define at least one Fargate profile to schedule pods on Fargate. launched. The Fargate profile allows an administrator to declare which pods run on Fargate. This declaration is done through the profile’s selectors. Each profile can have up to five selectors that contain a namespace and optional labels. You must define a namespace for every selector.
+
+**NOTE**: Pods are selected by matching a `namespace` for the selector and **ALL** of the `labels` specified in the selector.
 
 In this blog, I will show how to deploy a simple application using Amazon EKS on Fargate.
 
@@ -32,8 +36,8 @@ In this blog, I will show how to deploy a simple application using Amazon EKS on
    - Get the application code
 
      ```bash
-     git clone https://github.com/miztiik/eks-security-with-psp
-     cd eks-security-with-psp
+     git clone https://github.com/miztiik/eks-with-fargate-pods
+     cd eks-with-fargate-pods
      ```
 
 1. ## 🚀 Prepare the dev environment to run AWS CDK
@@ -96,10 +100,11 @@ In this blog, I will show how to deploy a simple application using Amazon EKS on
        - Auto-scaling Group with `2` desired instances.
        - The nodes will have a node role attached to them with `AmazonSSMManagedInstanceCore` permissions
        - Kubernetes label `app:miztiik_on_demand_ng`
-     - One **Spot** managed EC2 node group created from a launch template
-       - It create two `t3.large` instances running `Amazon Linux 2`
-       - Auto-scaling Group with `1` desired instances.
-       - The nodes will have a node role attached to them with `AmazonSSMManagedInstanceCore` permissions
+     - One **Fargate Profile**
+       - **Namespace**: `fargate-ns-01`
+       - **Labels**:
+         1. `owner:miztiik_automation`
+         1. `compute_provider:fargate`
 
      In this demo, let us launch the EKS cluster in a custom VPC using AWS CDK. Initiate the deployment with the following command,
 
@@ -110,7 +115,7 @@ In this blog, I will show how to deploy a simple application using Amazon EKS on
      After successfully deploying the stack, Check the `Outputs` section of the stack. You will find the `*ConfigCommand*` that allows yous to interact with your cluster using `kubectl`
 
    - **Stack: ssm-agent-installer-daemonset-stack**
-     This EKS AMI used in this stack does not include the AWS SSM Agent out of the box. If we ever want to patch or run something remotely on our EKS nodes, this agent is really helpful to automate those tasks. We will deploy a daemonset that will _run exactly once?_ on each node using a cron entry injection that deletes itself after successful execution. If you are interested take a look at the deamonset manifest here `stacks/back_end/eks_cluster_stacks/eks_ssm_daemonset_stack/eks_ssm_daemonset_stack.py`. This is inspired by this AWS guidance.
+     This EKS AMI used in this stack does not include the AWS SSM Agent out of the box. If we ever want to patch or run something remotely on our EKS nodes, this agent is really helpful to automate those tasks. We will deploy a daemonset that will _run exactly once?_ on each node using a cron entry injection that deletes itself after successful execution. If you are interested take a look at the daemonset manifest here `stacks/back_end/eks_cluster_stacks/eks_ssm_daemonset_stack/eks_ssm_daemonset_stack.py`. This is inspired by this AWS guidance.
 
      Initiate the deployment with the following command,
 
@@ -118,125 +123,93 @@ In this blog, I will show how to deploy a simple application using Amazon EKS on
      cdk deploy ssm-agent-installer-daemonset-stack
      ```
 
-     After successfully deploying the stack, You can use connect to the worker nodes instance using SSM Session Manager.
+     After successfully deploying the stack, You can connect to the worker nodes instance using SSM Session Manager.
 
 1. ## 🔬 Testing the solution
 
    We are all set with our cluster to deploy our pods.
 
-   1. **Create Producer Pods**
+   1. **Create Fargate Pods**
 
-      Since this is demo is about `nodeSelector` and _affinity_ feature of kubernetes, We will run _busybox_ image and label it `miztiik-producer`. We will later use this label to constraint our consumers.
+      To refresh our thoughts, To schedule pods on Fargate, The scheduler does a match of `namespace` and **ALL** the labels for that selector. While deploying the `eks-cluster-stack` stack we bootstrapped our cluster with a fargate profile with the following configuration,
 
-      I have included a sample manifest here `stacks/k8s_utils/sample_manifests/producer_anti_affinity.yml`. The interesting thing to note here is the node selector label `miztiik_on_demand_ng`. This will ensure the deployment runs only on ondemand instances. We are also using the `podAntiAffinity` to ensure that none of the producers are placed alongside consumer pods.
+      - One **Fargate Profile**
+        - **Namespace**: `fargate-ns-01`
+        - **Labels**:
+          1. `owner:miztiik_automation`
+          1. `compute_provider:fargate`
 
-      ```text
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: on-demand-producers
-      spec:
-        selector:
-          matchLabels:
-            app: miztiik-producer
-        replicas: 3
-        template:
-          metadata:
-            labels:
-              app: miztiik-producer
-          spec:
-            affinity:
-              podAntiAffinity:
-                requiredDuringSchedulingIgnoredDuringExecution:
-                - labelSelector:
-                    matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                      - miztiik-consumer
-                  topologyKey: "kubernetes.io/hostname"
-            nodeSelector:
-              app: miztiik_on_demand_ng
-            containers:
-            - name: busybox
-              image: busybox
-              command: [ "sh", "-c", "sleep 10h" ]
-      ```
+      We will define this in our manifest as well. I have included a sample manifest here `stacks/k8s_utils/sample_manifests/nginx_on_fargate.yml`. In the manifest, you can observe that we can mentioned the same namespace and the labels are same as the fargate profile.
 
-      Deploy the manifest,
-
-      ```bash
-      kubectl get po --selector app=miztiik-producer
-
-      ```
-
-      Expected output,
-
-      ```bash
-      NAME                                   READY   STATUS    RESTARTS   AGE
-      on-demand-producers-5c7d4dfcc9-dmv4c   1/1     Running   2          26h
-      on-demand-producers-5c7d4dfcc9-msssw   1/1     Running   2          26h
-      on-demand-producers-5c7d4dfcc9-vcxfz   1/1     Running   2          26h
-      ```
-
-   1. **Create Consumers**:
-
-      Since this is demo is about `nodeSelector` and _affinity_ feature of kubernetes, We will run _busybox_ image and label it `miztiik-consumer`. We will later use this label to constraint our consumers.
-
-      I have included a sample manifest here `stacks/k8s_utils/sample_manifests/consumer_anti_affinity.yml`. The interesting thing to note here is the node selector label `miztiik_spot_ng`. This will ensure the deployment runs only on spot instances. We are also using the `podAntiAffinity` to ensure that none of the consumers are placed alongside producer pods.
+      _Note: If the labels do not match and if you have a EC2 node group, then EKS will schedule the pods on EC2_
 
       ```text
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: spot-consumers
+        name: k-shop-01
+        namespace: fargate-ns-01
+        labels:
+          app: k-shop-01
       spec:
+        replicas: 3
         selector:
           matchLabels:
-            app: miztiik-consumer
-        replicas: 3
+            owner: miztiik_automation
+            compute_provider: fargate
         template:
           metadata:
             labels:
-              app: miztiik-consumer
+              owner: miztiik_automation
+              compute_provider: fargate
           spec:
-            affinity:
-              podAntiAffinity:
-                requiredDuringSchedulingIgnoredDuringExecution:
-                - labelSelector:
-                    matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                      - miztiik-producer
-                  topologyKey: "kubernetes.io/hostname"
-            nodeSelector:
-              app: miztiik_spot_ng
             containers:
-            - name: busybox
-              image: busybox
-              command: [ "sh", "-c", "sleep 10h" ]
+              - name: k-shop-nginx
+                image: nginx:latest
+                ports:
+                  - name: http
+                    containerPort: 80
       ```
 
       Deploy the manifest,
 
       ```bash
-      kubectl get po --selector app=miztiik-consumer
+      kubectl apply -f nginx_on_fargate.yml
+      ```
 
+      Verify the pods are running on fargate,
+
+      ```bash
+      kubectl get po -n fargate-ns-01
       ```
 
       Expected output,
 
       ```bash
-      NAME                              READY   STATUS    RESTARTS   AGE
-      spot-consumers-6cb6bd49dd-8kxwt   1/1     Running   2          26h
-      spot-consumers-6cb6bd49dd-lc4rd   1/1     Running   2          26h
-      spot-consumers-6cb6bd49dd-lpshs   1/1     Running   2          26h
+      NAME                         READY   STATUS    RESTARTS   AGE
+      k-shop-01-67947b487c-fhvq2   1/1     Running   0          3m15s
+      k-shop-01-67947b487c-l86f8   1/1     Running   0          3m15s
+      k-shop-01-67947b487c-zxqz4   1/1     Running   0          3m15s
+      ```
+
+      Check the nodes on the cluster
+
+      ```bash
+      kubectl get no -n fargate-ns-01
+      ```
+
+      Expected output,
+
+      ```bash
+      NAME                                                STATUS   ROLES    AGE   VERSION
+      fargate-ip-10-10-2-187.us-east-2.compute.internal   Ready    <none>   3m1s    v1.20.4-eks-6b7464
+      fargate-ip-10-10-3-101.us-east-2.compute.internal   Ready    <none>   3m4s    v1.20.4-eks-6b7464
+      fargate-ip-10-10-3-86.us-east-2.compute.internal    Ready    <none>   2m43s   v1.20.4-eks-6b7464
       ```
 
 1. ## 📒 Conclusion
 
-   Here we have demonstrated how to use Kubernetes selectors to schedule pods. Given the complexities involved these features need to be used carefully.
+   Here we have demonstrated how to use Fargate to schedule your pods. As much as fargate reduces administrative burden, there are few things application owners need to consider before committing to Fargate<sup>[2]</sup>
 
 1. ## 🧹 CleanUp
 
@@ -262,7 +235,7 @@ In this blog, I will show how to deploy a simple application using Amazon EKS on
 
 ## 📌 Who is using this
 
-This repository aims to show how to schedule pods using kubernetes schedulers to new developers, Solution Architects & Ops Engineers in AWS. Based on that knowledge these Udemy [course #1][102], [course #2][101] helps you build complete architecture in AWS.
+This repository aims to show how to schedule pods on AWS Fargate to new developers, Solution Architects & Ops Engineers in AWS. Based on that knowledge these Udemy [course #1][102], [course #2][101] helps you build complete architecture in AWS.
 
 ### 💡 Help/Suggestions or 🐛 Bugs
 
@@ -275,7 +248,7 @@ Thank you for your interest in contributing to our project. Whether it is a bug 
 ### 📚 References
 
 1. [AWS Docs: Fargate][1]
-1. [Kubernetes Docs: Assigning Pods to Nodes][2]
+1. [AWS Docs: Fargate Considerations][2]
 
 ### 🏷️ Metadata
 
@@ -284,6 +257,7 @@ Thank you for your interest in contributing to our project. Whether it is a bug 
 **Level**: 200
 
 [1]: https://aws.amazon.com/fargate
+[2]: https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations
 [100]: https://www.udemy.com/course/aws-cloud-security/?referralCode=B7F1B6C78B45ADAF77A9
 [101]: https://www.udemy.com/course/aws-cloud-security-proactive-way/?referralCode=71DC542AD4481309A441
 [102]: https://www.udemy.com/course/aws-cloud-development-kit-from-beginner-to-professional/?referralCode=E15D7FB64E417C547579

@@ -9,17 +9,17 @@ setuptools.setup(
     name="eks_with_fargate_pods",
     version="0.0.1",
 
-    description="An empty CDK Python app",
+    description="eks-with-fargate-pods",
     long_description=long_description,
     long_description_content_type="text/markdown",
 
     author="author",
 
-    package_dir={"": "eks_with_fargate_pods"},
-    packages=setuptools.find_packages(where="eks_with_fargate_pods"),
+    package_dir={"": "stacks"},
+    packages=setuptools.find_packages(where="stacks"),
 
     install_requires=[
-        "aws-cdk.core==1.108.1",
+        "aws-cdk.core==1.109",
     ],
 
     python_requires=">=3.6",

@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k-shop-f3
+  namespace: fargate-ns-01
+  labels:
+    app: miztiik-serverless-compute
+    compute_provider: fargate
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: miztiik-serverless-compute
+      compute_provider: fargate
+  template:
+    metadata:
+      labels:
+        app: miztiik-serverless-compute
+        compute_provider: fargate
+    spec:
+      containers:
+        - name: k-shop-nginx
+          image: nginx:latest
+          ports:
+            - name: http
+              containerPort: 80

@@ -1,21 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: k-shop-f3
+  name: k-shop-01
   namespace: fargate-ns-01
   labels:
-    app: miztiik-serverless-compute
-    compute_provider: fargate
+    app: k-shop-01
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: miztiik-serverless-compute
+      owner: miztiik_automation
       compute_provider: fargate
   template:
     metadata:
       labels:
-        app: miztiik-serverless-compute
+        owner: miztiik_automation
         compute_provider: fargate
     spec:
       containers:

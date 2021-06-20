@@ -132,7 +132,7 @@ class EksClusterStack(cdk.Stack):
         self.add_cluster_admin()
 
         # Adding Node groups
-        self.add_on_demand_ng(clust_name,desired_no=2)
+        # self.add_on_demand_ng(clust_name,desired_no=2)
         # self.add_spot_ng(clust_name,desired_no=2)
         self.add_fargate_profile(clust_name, fargate_ns_name="fargate-ns-01", create_fargate_ns=True )
 
@@ -263,7 +263,7 @@ class EksClusterStack(cdk.Stack):
                     namespace=f"{fargate_ns_name}",
                     labels=
                     {
-                        "app": "miztiik-serverless-compute",
+                        "owner": "miztiik_automation",
                         "compute_provider": "fargate"
                     }
                 )
